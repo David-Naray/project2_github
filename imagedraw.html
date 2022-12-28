@@ -1,0 +1,560 @@
+﻿<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <link rel="stylesheet" href="mystyle.css">
+    <title>ThreeJS ImgDrawing</title>
+
+    <style>
+        body{margin: 0;display:block}
+    </style>
+</head>
+
+<body>
+    
+    <div id="container" ></div>
+        <canvas id="c"></canvas>
+        <div id="labels" tabindex="0"></div>
+        <div id="email">
+            <p>Davidnaray1@gmail.com</p>
+        </div>
+    </div>
+</body>    
+<script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.144.0/build/three.module.js"
+            }
+        }
+</script>
+
+
+<script type="module">
+    import * as THREE from 'three';
+    import {OrbitControls} from 'https://unpkg.com/three@0.144/examples/jsm/controls/OrbitControls.js';
+    import {GLTFLoader} from 'https://unpkg.com/three@0.144/examples/jsm/loaders/GLTFLoader.js';
+    import { EffectComposer } from 'https://unpkg.com/three@0.144/examples/jsm/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'https://unpkg.com/three@0.144/examples/jsm/postprocessing/RenderPass.js';
+    //import { GlitchPass } from 'https://unpkg.com/three@0.144/examples/jsm/postprocessing/GlitchPass.js';
+    //import { FilmPass } from 'https://unpkg.com/three@0.144/examples/jsm/postprocessing/FilmPass.js';
+    //import { ShaderPass } from 'https://unpkg.com/three@0.144/examples/jsm/postprocessing/ShaderPass.js';
+    //import { UnrealBloomPass } from 'https://unpkg.com/three@0.144/examples/jsm/postprocessing/UnrealBloomPass';
+    //import { EXRLoader } from 'https://unpkg.com/three@0.144/examples/jsm/loaders/EXRLoader.js';
+
+    var scene,controls,camera,renderer,canvas,composer,finalComposer,cube,TerrainClass;
+    
+
+    //window.onscroll = function() {myFunction()};
+    function setup(){//scene setup &camera &renderer
+        canvas = document.querySelector('#c');        
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        
+        renderer = new THREE.WebGLRenderer({canvas});
+        renderer.setSize(width, height, false);
+        renderer.setPixelRatio( window.devicePixelRatio );
+        //const hdrtexURL=new URL("hdr.exr");
+        THREE.ColorManagement.legacyMode = false;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;//ReinhardToneMapping;
+        renderer.toneMappingExposure = 0;
+        //renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        document.body.appendChild( renderer.domElement );
+
+        renderer.toneMappingExposure = Math.pow( 1.8, 2.0 );
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+
+
+
+        const fov = 75;
+        const aspect = 2;  // the canvas default
+        const near = 1.1;
+        const far = 80;
+        camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
+        camera.position.set( 10,10,10 );
+        //camera.layers.enable(1);
+        controls = new OrbitControls( camera, canvas );
+        const geometry = new THREE.BoxGeometry( 1, 1, 1 );
+        const material = new THREE.MeshBasicMaterial( {color: 0x00ff00} );
+        cube = new THREE.Mesh( geometry, material );
+        //cube.position.x=1;
+        scene.add( cube );        
+        
+        TerrainClass = new TerrainGen(3,3);
+        //TerrainClass.gridAt(0,0)
+        TerrainClass.gridInit()
+        TerrainClass.generateDiagrams()
+
+        //for (let h = 0; h < 20; h++){
+        //    console.log((Math.random()*4)-2)
+        //}
+
+    }  
+
+    function addlights(){
+        //lighting
+        
+        const pointLight = new THREE.PointLight( 0xffffff, 3 )
+        pointLight.position.set( 0, 3.9, 0 );
+        pointLight.castShadow=true;
+        pointLight.castShadow=true;
+        pointLight.shadow.bias=-0.0001;
+        pointLight.shadow.mapSize.width=1024*4;
+        pointLight.shadow.mapSize.height=1024*4;
+        pointLight.shadow.radius = 60;
+        scene.add( pointLight );
+
+    }
+    
+    class VoronoiArea{
+        //a node is an interception point between lines that make up the voronoi diagram 
+        //hence nodes connect to other nodes
+        constructor(WorldPosition) {
+        const geometry = new THREE.BoxGeometry( 1, 1, 1 );
+        const material = new THREE.MeshBasicMaterial( {color: 0x111111} );
+        const cubee = new THREE.Mesh( geometry, material );
+        //cube.position.x=1;
+        cubee.scale.x=0.2
+        cubee.scale.y=0.2
+        cubee.scale.z=0.2
+         
+        this.pointsCreated=false
+        this.VoronoiCenter =new THREE.Vector3( 0,0, 0 )
+        this.createCenter();
+        this.WorldPosition = WorldPosition;//world position of grid, unique, will act as NODE ID
+        this.voronoiNodes=[]//contains points around the voronoi center, when you draw line between the points, the area within is the voronoiArea
+                            //for grids not to be infinite, grids surrounding
+
+        cubee.position.x=WorldPosition.x+this.VoronoiCenter.x
+        cubee.position.z=WorldPosition.z+this.VoronoiCenter.z
+        cubee.position.y=-0.5
+        scene.add( cubee );
+        //this.findPoints(TerrainClass.LoadedGrids)
+        }
+
+        createCenter(){//within 4 by 4 space plot a point, future calculations can adjust according to WorldPosition
+            //this.VoronoiCenter=new THREE.Vector3( 0,0, 0 )
+            this.VoronoiCenter.x=(Math.random()*4)-2 //from -2 to 2
+            this.VoronoiCenter.z=(Math.random()*4)-2
+        }
+
+        //grids surrounding this voronoi center must have been generated
+        //the grids at the perimeter of those generated should not have their points generated and a check should be made to 
+        //generate points if they have not been made depending on conditions
+        //so on a 3x3 grids the only Area to be defined is the ["11"] grid in the LoadedGrids 
+        //on a 4x4 this becomes a 2x2 area a 5x5 a 3x3 area.. so on
+        //were working on a 3x3 grid of grids, the code hasnt been tested for larger or smaller sets of grids
+        //though, if it works for a 3x3, the code should still scale with minimal change
+        
+        findPoints(LoadedGrids){//the players loaded grids map
+            //first things first, the points will be the intersection of lines that run halfway between voronoi points
+            //halfway between voronoi points in surrounding grids
+            //point is, youll only get a full diagram when fully surrounded hence if it is surrounded youll find them all in
+            //LoadedGrids, if not you dont attempt to draw the diagram, perhaps in the past all a voronois points were found and are 
+            //available in the class from storage but were concerned about creating an area around the player and what they may see
+
+            //look at the grids surrounding
+            //if this grid is "11" it will be 10,12,00,01,02,20,21,22
+            console.log("ih")
+            for (let h = 0; h < TerrainClass.heightCheck && h!=""; h++) {//loop for height
+                //console.log("height"+h)
+                for (let w = 0; w < TerrainClass.widthCheck; w++) {
+                    
+
+                }
+            }
+        }
+
+    }
+
+    class TerrainGen{
+        //LoadedGrids is a dictionary containing the NODE objects, each corresponding to a plane
+        //entries in the LoadedGrids would go like 01, 02,03,11,12,13,21,22,23.... corresponding to row and column
+        constructor(widthCheck,heightCheck) {
+            this.LoadedGrids = new Map();
+            //this.LoadedGrids.set("00",1)
+            //console.log(this.LoadedGrids.get(r.toString()+c.toString()))
+            this.widthCheck = widthCheck;
+            this.heightCheck = heightCheck;
+            this.curGrid=null;
+            //this.cGReference=null;
+        }
+
+        //create a network of nodes around player
+        //create a grid where the grids should be, making sure to not override existing grids/node areas
+
+        gridAt(pos){//checks whether a grid exists at a location ie the coord to the grid, world space 
+            //console.log(r.toString()+c.toString() in this.LoadedGrids)                
+            //console.log(r.toString()+c.toString())
+            if (typeof this.LoadedGrids.get(r.toString()+c.toString()) == 'undefined') {
+                //console.log(false)//means there is no grid here
+                return false
+            }else{
+                //there is a grid here
+                //since its coord
+                return true
+            }
+
+        }
+        
+        gridInit(){//create a grid at a location, input THREE.Vector3()
+            //you have a width and height around the player, if they move up check whether new forward chunks are to be loaded etc
+            //if forward created, the ones furthest back are replaced
+            const color = new THREE.Color( 0xffffff );
+            const geometryP = new THREE.PlaneGeometry( 4, 4 );
+            
+            //creates a grid of planes around the player
+            for (let h = 0; h < this.heightCheck; h++) {//loop for height
+                //console.log("height"+h)
+                for (let w = 0; w < this.widthCheck; w++) {//loop for width (this level works on individual grids in rows):operate here
+                    color.setHex( Math.random() * 0xffffff );
+                    const materialP = new THREE.MeshBasicMaterial( {color: color, side: THREE.DoubleSide} );
+                    const plane = new THREE.Mesh( geometryP, materialP );            
+                    plane.position.x=h*4 -4+cube.position.x;
+                    plane.position.y=-0.5;
+                    plane.position.z=w*4 -4+cube.position.z;
+                    plane.rotation.x=Math.PI/2;
+                    scene.add(plane);
+                    this.LoadedGrids.set((h.toString()+w.toString()),plane)
+                    //console.log(h.toString()+w.toString())
+                    var pos=new THREE.Vector3( h*4 -4+cube.position.x, 0, w*4 -4+cube.position.z )
+                    var VoronoiClass = new VoronoiArea(pos);
+                }
+            }
+            this.curGrid=this.LoadedGrids.get("11")//this is the grid plane which the player spawns at
+            //this.cGReference="11"
+            //console.log(this.curGrid.position)
+            //this.LoadedGrids.get("10").position.x=5
+
+            //for (let w = 0; w < this.widthCheck; w++) {
+            //    this.LoadedGrids.get(w.toString()+"0").position.z-=4
+            //}
+            //this.swapRows(0,1)
+            //setTimeout(() => {this.swapRows(0,1); console.log("ho");setTimeout(() => {this.swapRows(0,1); console.log("ho") }, 2000); }, 2000);
+            
+        }
+
+        checkCrossover(dir){//checks whether the player has crossed into another chunk/grid
+            //when this method is called, character moved in a cardinal direction
+            //grids are a certain size 4 by 4, so if the player moves more than 2 in any cardinal direction then they 
+            //leave its bounds hence cannot be in that chunk anymore
+
+            //once verified you are no longer in your grid it sets curGrid to the one you moved to
+            //you then need to depending on how youve changed grid NS or EW, 
+                //positions need to changed in the array
+                //delete grids
+                //replace grids
+            const playerPos=cube.position
+            const curGridPos=this.curGrid.position
+            switch(dir) {
+                case 'NS'://north south
+                    if(playerPos.z<curGridPos.z-2){//-2 for lower bound
+                        //console.log("hmmm")
+                        
+                        this.NSadjustment(true)
+                        this.curGrid=this.LoadedGrids.get("11")
+                    }else if(playerPos.z>curGridPos.z+2){
+                        this.NSadjustment(false)
+                        this.curGrid=this.LoadedGrids.get("11")
+                    }
+                    break
+                case 'EW'://east west
+                    //console.log("l")
+                    if(playerPos.x<curGridPos.x-2){
+                        //console.log("hmmm")
+                        this.EWadjustment(true)
+                        this.curGrid=this.LoadedGrids.get("11")
+                    }else if(playerPos.x>curGridPos.x+2){
+                        console.log("CROSSED")
+                        this.EWadjustment(false)
+                        this.curGrid=this.LoadedGrids.get("11")
+                    }
+                    break
+                }
+        }
+
+        incrementRows(a,b,c){//you have rows a, b, swaps them
+            //var elemO=null;
+            //var elemI=null;
+            for (let w = 0; w < this.widthCheck; w++){//for the number of columns the super grid
+                //const elemO=this.LoadedGrids.get(w.toString()+a.toString())//a=1 test case, first row, b=0
+                //const clone = structuredClone(object);
+                //console.log(elemO.position)
+                //console.log(b.toString()+w.toString())
+                //though in the map things change positions dont change in scene so before the actual position needs to be swapped
+
+                //both grids share x coord, they differ in z, change the one in b to that of a, and a to that of b's z coord
+                //this.LoadedGrids.get(w.toString()+b.toString()).position.z=this.LoadedGrids.get(w.toString()+a.toString()).position.z
+                
+                //elements in this row, move up to the next row
+                this.LoadedGrids.set(w.toString()+(a+c).toString(),this.LoadedGrids.get(w.toString()+a.toString()))
+
+                //elemO.position.z+=4
+                //console.log(b+c)
+                this.LoadedGrids.set(w.toString()+(b+c).toString(),this.LoadedGrids.get(w.toString()+b.toString()))
+                //this.LoadedGrids.get(w.toString()+b.toString()).position.z=this.LoadedGrids.get(w.toString()+a.toString()).position.z+4
+
+            }
+        }
+
+        incrementColumns(a,b,c){//also need to swap the columns grid positions
+            var elemO=null;
+            var elemI=null;
+            for (let h = 0; h < this.heightCheck; h++){//for the number of columns the super grid
+                this.LoadedGrids.set((a+c).toString()+h.toString(),this.LoadedGrids.get(a.toString()+h.toString()))
+                this.LoadedGrids.set((b+c).toString()+h.toString(),this.LoadedGrids.get(b.toString()+h.toString()))
+
+
+                //elemO=this.LoadedGrids.get(h.toString()+a.toString())
+                
+                //this.LoadedGrids.set(h.toString()+a.toString(),this.LoadedGrids.get(h.toString()+b.toString()))
+                //this.LoadedGrids.get(h.toString()+a.toString()).position=elemO.position
+
+                //this.LoadedGrids.set(h.toString()+b.toString(),elemO)
+
+            }
+        }
+
+        replaceRow(a,c){//c for moving either forward or back 1 or -1
+            const color = new THREE.Color( 0xffffff );
+            const geometryP = new THREE.PlaneGeometry( 4, 4 );
+            for (let w = 0; w < this.widthCheck; w++){
+                color.setHex( Math.random() * 0xffffff );
+                const materialP = new THREE.MeshBasicMaterial( {color: color, side: THREE.DoubleSide} );
+                const plane = new THREE.Mesh( geometryP, materialP );   
+                //console.log(cube.position.x+","+-1*Math.round((Math.round(Math.sign(cube.position.x)*cube.position.x / 2)*2)/4)*4)//-4*Math.sign(cube.position.x)))   
+                //const gridSnap=Math.sign(cube.position.x)*Math.round((Math.round(Math.sign(cube.position.x)*cube.position.x / 2)*2)/4)*4-4*Math.sign(cube.position.x)
+                                                                                        //8/2=4,,,4*2=8...8/4=2
+                //var gridSnapT=Math.round((Math.round(Math.sign(cube.position.x)*cube.position.x / 2)*2)/4)*4 -4
+                //if the player moves 
+                
+                //if(cube.position.x>7&& Math.sign(gridSnapT)==-1 && cube.position.x%4!=0){
+                    //gridSnapT-=4
+                //}
+                plane.position.x=this.LoadedGrids.get("11").position.x-4+w*4//sad that this is a solution
+                //cube.position.x;
+                plane.position.y=-0.5;
+                plane.position.z=(Math.round(cube.position.z / 4) * 4)-4*c//closest multiple of 4
+                plane.rotation.x=Math.PI/2;
+                scene.add(plane);
+                this.LoadedGrids.set((w.toString()+a.toString()),plane)
+            }
+
+        }
+        
+        replaceColumn(a,c){
+            const color = new THREE.Color( 0xffffff );
+            const geometryP = new THREE.PlaneGeometry( 4, 4 );
+            for (let h = 0; h < this.heightCheck; h++){
+                color.setHex( Math.random() * 0xffffff );
+                const materialP = new THREE.MeshBasicMaterial( {color: color, side: THREE.DoubleSide} );
+                const plane = new THREE.Mesh( geometryP, materialP );            
+                plane.position.x=(Math.round(cube.position.x / 4) * 4)-4*c//cube.position.x;
+                plane.position.y=-0.5;
+                //plane.position.z=h*4-4+(Math.round(cube.position.z / 4) * 4)//closest multiple of 4
+                plane.position.z=this.LoadedGrids.get("11").position.z-4+h*4
+                plane.rotation.x=Math.PI/2;
+                scene.add(plane);
+                this.LoadedGrids.set((a.toString()+h.toString()),plane)
+            }
+        }
+        
+        deleteRow(a){
+            for (let w = 0; w < this.widthCheck; w++){//for the number of columns the super grid
+                const elemO=this.LoadedGrids.get(w.toString()+a.toString())//a=1 test case, first row, b=0
+                scene.remove(elemO)
+            }
+
+        }
+
+        deleteCol(a){
+            for (let h = 0; h < this.heightCheck; h++){//for the number of columns the super grid
+                const elemO=this.LoadedGrids.get(a.toString()+h.toString())//a=1 test case, first row, b=0
+                scene.remove(elemO)
+            }
+
+        }
+
+        NSadjustment(fb){//true false input is if forward or back bool (NS)
+            //take the 
+            switch (fb){
+                case true://forward
+                    //all rows move back and row 2 is deleted, replaced by the first, the first by the zero'th
+                    //the second is replaced by a newly created row 
+
+                    //row 3, behind player needs deleting, it vanishes from 3x3 chunk load
+                    this.deleteRow(2)
+                    //since youre moving forward you need to make the row youre moving into the 'middle' ie 1 from 0, +1
+                    this.incrementRows(1,0,1)
+                    //now that row 1 is moved as row 2, row 0 now is row1, we need to replace the grids in row 0
+                    this.replaceRow(0,1)
+                    
+                    //console.log("hmmm")
+                    break
+                case false://backward
+                    //console.log("hmmm")
+                    this.deleteRow(0)//deletes most forward row
+                    this.incrementRows(1,2,-1)
+                    this.replaceRow(2,-1)
+                    break
+
+            }
+        }
+
+        EWadjustment(lr){//like NSadjustment but for left or right (EW)
+            switch (lr){
+                case true://forward
+                    //all rows move back and row 2 is deleted, replaced by the first, the first by the zero'th
+                    //the second is replaced by a newly created row 
+
+                    //row 3, behind player needs deleting, it vanishes from 3x3 chunk load
+                    this.deleteCol(2)//right hand side column
+                    //since youre moving forward you need to make the row youre moving into the 'middle' ie 1 from 0, +1
+                    this.incrementColumns(1,0,1)//increment column up
+                    //now that row 1 is moved as row 2, row 0 now is row1, we need to replace the grids in row 0
+                    this.replaceColumn(0,1)
+                    
+                    //console.log("hmmm")
+                    break
+                case false://backward
+                    //console.log("hmmm")
+                    this.deleteCol(0)//deletes most forward row
+                    this.incrementColumns(1,2,-1)
+                    this.replaceColumn(2,-1)
+                    break
+
+            }
+        }
+
+
+        generateDiagrams(){//the overall image of voronoi diagrams together
+            //taking a node object, now instea of planes, the LoadedGrids is actually the node objects...
+            //so you know its relative position, so for the grids you need to load, edge grids need to surround themselves
+            //and label the generated graph as a phantom grid which has no diagram of its own.
+
+            //go through LoadedGrids and generate the points and then those points are returned to the object
+            //console.log("hi")    
+            
+            //"01" //1 is the 2 row, 0th column
+            //for (let h = 0; h < 3; h++) {//code to identify surrounding grids of the current grid
+            //    for (let w = 0; w < 3 ; w++) {
+            //        
+            //        if(h.toString()=="0" && w.toString()=="1"){//to dodge the current grid
+            //            continue
+            //        }
+            //        scene.remove(this.LoadedGrids.get(h.toString()+w.toString()))
+            //    }
+            //}
+
+                    //these grids trigger the spawn of non-existing surrounding grids and use spawned in grids to calculate its points
+                    //create a new map to store the ring of grids outside of those in LoadedGrids
+                    //the convention is akin to that of LoadedGrids                    
+                    
+            for(var x of this.LoadedGrids.entries()){
+                //x[0] is the key like "11", x[1] is the value, the voronoiArea class object
+
+                //if the grid is at the first and last column, it has to be an edge 
+                //if grid is at top row or bottom row it has to be an edge also
+                if(x[0].charAt(1)==0 || x[0].charAt(0)==0 || x[0].charAt(0)==this.widthCheck-1 || x[0].charAt(1)==this.heightCheck-1 ){
+                    //x[0] is an edge grid
+
+                    //take x[0], there are 8 surrounding grids, existing or not
+
+                    for (let h = 0; h < 3; h++) {//code to identify surrounding grids of the current grid
+                        for (let w = 0; w < 3 ; w++) {
+       
+                            if(h.toString()==x[0].charAt(0) && w.toString()==x[0].charAt(1)){//to dodge the current grid
+                                continue
+                            }
+                            //loop over the grids that are in LoadedGrids and access their voronoi points
+                            //the rest you generate if you do not find it in the data structure for the outer ring
+                            //and add it to it
+                            //that data structure gets cleared and redone (for now)--- should be a server request
+
+                            //access the outer ring array
+
+                            //scene.remove(this.LoadedGrids.get(h.toString()+w.toString()))
+                            
+                        }
+                    }
+                }
+
+            }
+        }
+
+        outerRing(){//you have the grids generated by the player but you need voronoi points just outside of it to 
+                    //generate all the grids required
+            //the outside ring is  gonna be (rowlength+2)*2 +(width)*2
+                    //(each expanded corner + the grids to the left) * 2 to include for the right
+                    //width*2 which will be the above and below
+                    //the full ring
+            //Loadedgrids starts at "00" then outring must start at "-1-1"
+            for (let h = -1; h < ((this.heightCheck+2)*2)-1; h++) {//adjust to align with LoadedGrids
+
+            }
+            for (let w = 0; w < (this.widthCheck*2); w++) {
+            
+            }
+        }
+    }
+
+    function characterControl(){
+        document.onkeydown=function (e){
+            if(e.keyCode==38){//forward
+                cube.position.z-=2;
+                //console.log((Math.round(cube.position.z / 4) * 4))
+                TerrainClass.checkCrossover('NS')//check if cube has crossed into forward chunk
+                animate()
+            }else if(e.keyCode==39){//right
+                cube.position.x+=2;
+                TerrainClass.checkCrossover('EW')
+                animate()
+            }else if(e.keyCode==40){//back
+                cube.position.z+=2;
+                TerrainClass.checkCrossover('NS')
+                animate()
+            }else if(e.keyCode==37){//left
+                cube.position.x-=2;
+                TerrainClass.checkCrossover('EW')
+                animate()
+            }
+            console.log("run after the move");
+            //each chunk should be 4 by 4, 1st grid forms at (0,0) with 2 grids forming forward and back
+            //ie, if the player moves into the forward chunk, a new chunk should form ahead and the chunk 2 behind should delete 
+            //forming a larger square around player
+            //ie it should call terrain gen
+            //if(cube.position.x%4==0){//if you travel sideways if you cross the distance of a chunk load new ones
+                
+            //}else if(cube.position.z%4==0){//f you travel forward/back and cross chunk lenth then you load chunks
+            
+            //}
+
+        }
+    }
+
+    function animate() {
+        
+	    requestAnimationFrame( animate );        
+        controls.update();
+
+        // convert the normalized position to CSS coordinates
+        //create ratio betweem camera and the origin of the labels cube parent
+        //cube.position.y-=0.0001;
+        renderer.render(scene, camera);
+        
+        //composer.render();
+    }
+
+ 
+    setup();
+    characterControl()
+    addlights();
+    animate();
+</script>
+
+</script>
+</html>
